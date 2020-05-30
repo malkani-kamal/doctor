@@ -1,0 +1,259 @@
+./bin/cryptogen generate --config=./crypto-config.yaml
+mkdir channel-artifacts
+
+export FABRIC_CFG_PATH=$PWD
+./bin/configtxgen -profile SampleMultiNodeEtcdRaft -channelID my-sys-channel -outputBlock ./channel-artifacts/genesis_block.pb
+
+# The channel.tx artifact contains the definitions for our sample channel
+export CHANNEL_NAME=mychannel  
+./bin/configtxgen -profile TwoOrgsChannel -outputCreateChannelTx ./channel-artifacts/channel.tx -channelID $CHANNEL_NAME
+./bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/CustMSPanchors.tx -channelID $CHANNEL_NAME -asOrg CustMSP
+./bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/DoctMSPanchors.tx -channelID $CHANNEL_NAME -asOrg DoctMSP
+
+
+export FABRIC_CFG_PATH=$PWD
+export CHANNEL_NAME=mychannel
+export home_directory=/home/ubuntu/fabric-samples/doctor
+export BYFN_CAC_PRIVATE_KEY=$(cd crypto-config/peerOrganizations/cust.starhospital.com/ca && ls *_sk)
+export BYFN_CAD_PRIVATE_KEY=$(cd crypto-config/peerOrganizations/doct.starhospital.com/ca && ls *_sk)
+
+#docker-compose -f docker-compose-cli.yaml -f docker-compose-etcdraft2.yaml up -d
+docker-compose -f docker-compose-cli.yaml -f docker-compose-couch.yaml -f docker-compose-ca.yaml up -d
+
+docker exec -it Ccli bash
+
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/users/Admin@cust.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.cust.starhospital.com:7051
+CORE_PEER_LOCALMSPID="CustMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt
+export CHANNEL_NAME=mychannel
+
+peer channel create -o orderer.starhospital.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/channel.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+
+peer channel join -b mychannel.block
+peer channel update -o orderer.starhospital.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/CustMSPanchors.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+
+
+-----------
+peer 2
+--------------
+
+docker exec -it Ccli bash
+
+export CHANNEL_NAME=mychannel
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/users/Admin@doct.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.doct.starhospital.com:9051
+CORE_PEER_LOCALMSPID="DoctMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt
+
+peer channel join -b mychannel.block
+peer channel update -o orderer.starhospital.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/DoctMSPanchors.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+-------------
+
+
+Error: error getting endorser client for channel: endorser client failed to connect to peer0.doct.starhospital.com:7052: failed to create new connection: connection error: desc = "transport: error while dialing: dial tcp 172.19.0.8:7052: connect: connection refused"
+Problem of port.  Need to give the same port as configtx.yaml file anchor peer port.
+
+
+---------------
+run from peer1
+-----------
+
+cd /opt/gopath/src/github.com/hyperledger/fabric-samples/chaincode/abstore/go
+GO111MODULE=on go mod vendor
+cd -
+
+peer lifecycle chaincode package mycc.tar.gz --path github.com/hyperledger/fabric-samples/chaincode/abstore/go/ --lang golang --label mycc_1
+peer lifecycle chaincode install mycc.tar.gz
+
+CC_PACKAGE_ID=mycc_1:ca8584f04c3fafee33fe6b35a41fdabe0edf957e248bbaf2ad29f5e9193e2861
+
+
+---------------
+run from peer1 only
+------------
+
+export CHANNEL_NAME=mychannel
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/users/Admin@doct.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.doct.starhospital.com:9051
+CORE_PEER_LOCALMSPID="DoctMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt
+
+#peer lifecycle chaincode package mycc.tar.gz --path github.com/hyperledger/fabric-samples/chaincode/abstore/go/ --lang golang --label mycc_1
+peer lifecycle chaincode install mycc.tar.gz
+#CC_PACKAGE_ID=mycc_1:ca8584f04c3fafee33fe6b35a41fdabe0edf957e248bbaf2ad29f5e9193e2861
+peer lifecycle chaincode approveformyorg --channelID $CHANNEL_NAME --name mycc --version 1.0 --init-required --package-id $CC_PACKAGE_ID --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+
+---------------
+run from peer1
+-----------
+
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/users/Admin@cust.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.cust.starhospital.com:7051
+CORE_PEER_LOCALMSPID="CustMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt
+export CHANNEL_NAME=mychannel
+
+peer lifecycle chaincode approveformyorg --channelID $CHANNEL_NAME --name mycc --version 1.0 --init-required --package-id $CC_PACKAGE_ID --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+                                                                                                                                                                          
+output will be like this
+2020-02-28 16:07:07.128 UTC [cli.lifecycle.chaincode] setOrdererClient -> INFO 001 Retrieved channel (mychannel) orderer endpoint: orderer.starhospital.com:7050
+2020-02-28 16:07:09.997 UTC [chaincodeCmd] ClientWait -> INFO 002 txid [6e53347e3308624f5caaeac093aa2d8aa00a6173039024a3b09436b4f14ea530] committed with status (VALID) at
+
+
+--------------------
+Run both below mentioned command from only one peer1
+--------------
+peer lifecycle chaincode checkcommitreadiness --channelID $CHANNEL_NAME --name mycc --version 1.0 --init-required --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem --output json
+
+peer lifecycle chaincode commit -o orderer.starhospital.com:7050 --channelID $CHANNEL_NAME --name mycc --version 1.0 --sequence 1 --init-required --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem --peerAddresses peer0.cust.starhospital.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt --peerAddresses peer0.doct.starhospital.com:9051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt
+
+output
+2020-02-28 16:17:51.109 UTC [chaincodeCmd] ClientWait -> INFO 001 txid [64df8c5e03438e65bd7d41ad590ff748520c32a8569aa58b1b56a5174e9ba75e] committed with status (VALID) at peer0.doct.starhospital.com:9052
+2020-02-28 16:17:51.119 UTC [chaincodeCmd] ClientWait -> INFO 002 txid [64df8c5e03438e65bd7d41ad590ff748520c32a8569aa58b1b56a5174e9ba75e] committed with status (VALID) at peer0.cust.starhospital.com:7052
+
+
+
+peer chaincode invoke -o orderer.starhospital.com:7050 --isInit --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem -C $CHANNEL_NAME -n mycc_1 --peerAddresses peer0.cust.starhospital.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt --peerAddresses peer0.doct.starhospital.com:9051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt -c '{"Args":["Init","a","100","b","100"]}' --waitForEvent
+
+
+peer chaincode query -C $CHANNEL_NAME -n mycc -c '{"Args":["query","a"]}'
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Installing your chaincode
+--------------------------
+
+set the gopath in .bashrc file
+GOPATH="$HOME/fabric-samples"
+
+Now change the below mentioned lines with
+
+	"github.com/hyperledger/fabric/core/chaincode/shim"
+	"github.com/hyperledger/fabric/protos/peer"
+
+    "github.com/hyperledger/fabric-chaincode-go/shim"
+    "github.com/hyperledger/fabric-protos-go/peer"
+
+
+and now go do chaincode/doctor/go folder 
+
+go get -u github.com/hyperledger/fabric-chaincode-go
+go build
+
+Follow the below mentioned path.
+https://hyperledger-fabric.readthedocs.io/en/release-2.0/chaincode4ade.html
+
+go mod init github.com/hyperledger/fabric-samples/chaincode/doctor/go
+
+Restart the containers if you are installing the second chaincode.  I mean if go.mod and go.sum files are generated after starting the containers. 
+
+
+
+
+
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/users/Admin@cust.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.cust.starhospital.com:7051
+CORE_PEER_LOCALMSPID="CustMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt
+export CHANNEL_NAME=mychannel
+
+
+
+cd /opt/gopath/src/github.com/hyperledger/fabric-samples/chaincode/doctor/go
+GO111MODULE=on go mod vendor
+cd -
+
+peer lifecycle chaincode package docc.tar.gz --path github.com/hyperledger/fabric-samples/chaincode/doctor/go/ --lang golang --label docc_1
+peer lifecycle chaincode install docc.tar.gz
+
+CC_PACKAGE_ID=docc_1:be62fbc54ae7ebadc924393a6161acac040ee5576ab7c7750a5ee6f8afb59b29
+
+
+---------------
+run from peer1 and set the peer2 variables.  Do not run it from other window.
+------------
+
+export CHANNEL_NAME=mychannel
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/users/Admin@doct.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.doct.starhospital.com:9051
+CORE_PEER_LOCALMSPID="DoctMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt
+
+CC_PACKAGE_ID=docc_1:be62fbc54ae7ebadc924393a6161acac040ee5576ab7c7750a5ee6f8afb59b29
+peer lifecycle chaincode install docc.tar.gz
+#CC_PACKAGE_ID=docc_1:be62fbc54ae7ebadc924393a6161acac040ee5576ab7c7750a5ee6f8afb59b29
+peer lifecycle chaincode approveformyorg --channelID $CHANNEL_NAME --name docc --version 1.0 --init-required --package-id $CC_PACKAGE_ID --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+
+---------------
+run from peer1
+-----------
+
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/users/Admin@cust.starhospital.com/msp
+CORE_PEER_ADDRESS=peer0.cust.starhospital.com:7051
+CORE_PEER_LOCALMSPID="CustMSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt
+export CHANNEL_NAME=mychannel
+
+peer lifecycle chaincode approveformyorg --channelID $CHANNEL_NAME --name docc --version 1.0 --init-required --package-id $CC_PACKAGE_ID --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem
+                                                                                                                                                                          
+output will be like this
+2020-02-28 16:07:07.128 UTC [cli.lifecycle.chaincode] setOrdererClient -> INFO 001 Retrieved channel (mychannel) orderer endpoint: orderer.starhospital.com:7050
+2020-02-28 16:07:09.997 UTC [chaincodeCmd] ClientWait -> INFO 002 txid [6e53347e3308624f5caaeac093aa2d8aa00a6173039024a3b09436b4f14ea530] committed with status (VALID) at
+
+
+--------------------
+Run both below mentioned command from only one peer1
+--------------
+peer lifecycle chaincode checkcommitreadiness --channelID $CHANNEL_NAME --name docc --version 1.0 --init-required --sequence 1 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem --output json
+
+peer lifecycle chaincode commit -o orderer.starhospital.com:7050 --channelID $CHANNEL_NAME --name docc --version 1.0 --sequence 1 --init-required --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem --peerAddresses peer0.cust.starhospital.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt --peerAddresses peer0.doct.starhospital.com:9051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt
+
+output
+2020-02-28 16:17:51.109 UTC [chaincodeCmd] ClientWait -> INFO 001 txid [64df8c5e03438e65bd7d41ad590ff748520c32a8569aa58b1b56a5174e9ba75e] committed with status (VALID) at peer0.doct.starhospital.com:9052
+2020-02-28 16:17:51.119 UTC [chaincodeCmd] ClientWait -> INFO 002 txid [64df8c5e03438e65bd7d41ad590ff748520c32a8569aa58b1b56a5174e9ba75e] committed with status (VALID) at peer0.cust.starhospital.com:7052
+
+
+
+peer chaincode invoke -o orderer.starhospital.com:7050 --isInit --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp/tlscacerts/tlsca.starhospital.com-cert.pem -C $CHANNEL_NAME -n docc --peerAddresses peer0.cust.starhospital.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls/ca.crt --peerAddresses peer0.doct.starhospital.com:9051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls/ca.crt -c '{"Args":["init","Ajit Shah","1","test1@gmail.com","9860606060","Aundh"]}' --waitForEvent
+
+
+peer chaincode query -C $CHANNEL_NAME -n docc -c '{"Args":["GetDoctorByID","1"]}'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Additional commands
+-------------------------
+
+peer lifecycle chaincode querycommitted --channelID mychannel
+
+peer lifecycle chaincode queryinstalled --channelID mychannel
+
+peer lifecycle chaincode queryinstalled
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+cd /opt/gopath/src/github.com/hyperledger/fabric-samples/chaincode/doctor/go
+GO111MODULE=on go mod vendor
+cd -
+
+peer lifecycle chaincode package urcc.tar.gz --path github.com/hyperledger/fabric-samples/chaincode/doctor/go/ --lang golang --label urcc_1
+peer lifecycle chaincode install urcc.tar.gz
+
+CC_PACKAGE_ID=mycc_1:ca8584f04c3fafee33fe6b35a41fdabe0edf957e248bbaf2ad29f5e9193e2861
+
+---------------------------------------------------------
