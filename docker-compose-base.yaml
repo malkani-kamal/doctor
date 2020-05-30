@@ -1,0 +1,65 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+version: '2'
+
+services:
+
+  orderer.starhospital.com:
+    container_name: orderer.starhospital.com
+    extends:
+      file: peer-base.yaml
+      service: orderer-base
+    volumes:
+        - ./channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+        - ./crypto-config/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/msp:/var/hyperledger/orderer/msp
+        - ./crypto-config/ordererOrganizations/starhospital.com/orderers/orderer.starhospital.com/tls/:/var/hyperledger/orderer/tls
+        - orderer.starhospital.com:/var/hyperledger/production/orderer
+    ports:
+      - 7050:7050
+
+  peer0.cust.starhospital.com:
+    container_name: peer0.cust.starhospital.com
+    extends:
+      file: peer-base.yaml
+      service: peer-base
+    environment:
+      - CORE_PEER_ID=peer0.cust.starhospital.com
+      - CORE_PEER_ADDRESS=peer0.cust.starhospital.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.cust.starhospital.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.cust.starhospital.com:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.cust.starhospital.com:7051
+      - CORE_PEER_LOCALMSPID=CustMSP
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/peerOrganizations/cust.starhospital.com/peers/peer0.cust.starhospital.com/tls:/etc/hyperledger/fabric/tls
+        - peer0.cust.starhospital.com:/var/hyperledger/production
+    ports:
+      - 7051:7051
+
+  peer0.doct.starhospital.com:
+    container_name: peer0.doct.starhospital.com
+    extends:
+      file: peer-base.yaml
+      service: peer-base
+    environment:
+      - CORE_PEER_ID=peer0.doct.starhospital.com
+      - CORE_PEER_ADDRESS=peer0.doct.starhospital.com:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.doct.starhospital.com:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.doct.starhospital.com:9051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.doct.starhospital.com:9051
+      - CORE_PEER_LOCALMSPID=DoctMSP
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/peerOrganizations/doct.starhospital.com/peers/peer0.doct.starhospital.com/tls:/etc/hyperledger/fabric/tls
+        - peer0.doct.starhospital.com:/var/hyperledger/production
+    ports:
+      - 9051:9051
